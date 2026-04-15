@@ -72,12 +72,13 @@
   function isEnglishLanguageCode(languageCode) {
     var normalizedCode = String(languageCode || "").trim().toLowerCase();
     if (!normalizedCode) return false;
+    var canonicalCode = normalizedCode.split("/").filter(Boolean).pop() || normalizedCode;
     return (
-      normalizedCode === "en" ||
-      normalizedCode === "eng" ||
-      normalizedCode === "en-us" ||
-      normalizedCode === "en-gb" ||
-      normalizedCode === "english"
+      canonicalCode === "en" ||
+      canonicalCode === "eng" ||
+      canonicalCode === "en-us" ||
+      canonicalCode === "en-gb" ||
+      canonicalCode === "english"
     );
   }
 
