@@ -87,6 +87,115 @@
     return languages.some(isEnglishLanguageCode);
   }
 
+  function getTitleTokensForLanguageCheck(title) {
+    return normalizeSearchQuery(title).split(" ").filter(Boolean);
+  }
+
+  function hasSupportedTitleScript(title) {
+    return !/[^\u0000-\u024f0-9\s'"&:;,.!?()\-]/.test(String(title || ""));
+  }
+
+  function isLikelyEnglishTitle(title) {
+    var rawTitle = String(title || "").trim();
+    if (!rawTitle) return false;
+    if (!hasSupportedTitleScript(rawTitle)) return false;
+
+    var tokens = getTitleTokensForLanguageCheck(rawTitle);
+    if (tokens.length === 0) return false;
+
+    var englishHintWords = {
+      a: true,
+      an: true,
+      and: true,
+      by: true,
+      for: true,
+      from: true,
+      in: true,
+      of: true,
+      on: true,
+      or: true,
+      the: true,
+      to: true,
+      with: true,
+    };
+    var nonEnglishLeadingArticles = {
+      da: true,
+      de: true,
+      del: true,
+      der: true,
+      des: true,
+      di: true,
+      du: true,
+      el: true,
+      il: true,
+      la: true,
+      le: true,
+      les: true,
+      los: true,
+      las: true,
+      lo: true,
+      una: true,
+      uno: true,
+      un: true,
+      uma: true,
+      um: true,
+    };
+    var nonEnglishStopWords = {
+      con: true,
+      da: true,
+      de: true,
+      del: true,
+      della: true,
+      delle: true,
+      des: true,
+      di: true,
+      du: true,
+      el: true,
+      en: true,
+      et: true,
+      la: true,
+      le: true,
+      les: true,
+      los: true,
+      las: true,
+      para: true,
+      por: true,
+      que: true,
+      sin: true,
+      und: true,
+      y: true,
+    };
+
+    var englishScore = 0;
+    var nonEnglishScore = 0;
+    for (var i = 0; i < tokens.length; i++) {
+      var token = tokens[i];
+      if (englishHintWords[token]) englishScore += 1;
+      if (nonEnglishStopWords[token]) nonEnglishScore += 1;
+    }
+
+    var firstToken = tokens[0];
+    if (nonEnglishLeadingArticles[firstToken] && !englishHintWords[firstToken]) {
+      nonEnglishScore += 1;
+    }
+
+    var lettersOnly = rawTitle.toLowerCase().replace(/[^a-z\u00c0-\u024f]+/g, "");
+    var nonAsciiLetters = lettersOnly.replace(/[a-z]/g, "").length;
+    if (lettersOnly.length >= 6 && nonAsciiLetters / lettersOnly.length > 0.35) {
+      nonEnglishScore += 1;
+    }
+
+    if (nonEnglishScore >= 2 && nonEnglishScore > englishScore) {
+      return false;
+    }
+
+    if (nonEnglishScore >= 1 && englishScore === 0 && tokens.length >= 3 && nonEnglishLeadingArticles[firstToken]) {
+      return false;
+    }
+
+    return true;
+  }
+
   function getSearchQueryVariations(value) {
     var parsedQuery = parseTitleAuthorQuery(value);
     if (!parsedQuery.normalizedQuery) return [];
@@ -200,7 +309,7 @@
 
   function isEnglishGutenbergBook(book) {
     var languages = book && Array.isArray(book.languages) ? book.languages : [];
-    return !!(book && book.title && hasEnglishLanguage(languages));
+    return !!(book && book.title && hasEnglishLanguage(languages) && isLikelyEnglishTitle(book.title));
   }
 
   async function fetchGutenbergBooksByQuery(query) {
@@ -271,7 +380,14 @@
     var hasPublicEbookAccess = book && book.ebook_access === "public";
     var hasUsableIdentifier = book && (book.key || (Array.isArray(book.edition_key) && book.edition_key.length > 0));
     var languages = book && Array.isArray(book.language) ? book.language : [];
-    return !!(hasPublicEbookAccess && book && book.title && hasUsableIdentifier && hasEnglishLanguage(languages));
+    return !!(
+      hasPublicEbookAccess &&
+      book &&
+      book.title &&
+      hasUsableIdentifier &&
+      hasEnglishLanguage(languages) &&
+      isLikelyEnglishTitle(book.title)
+    );
   }
 
   async function fetchOpenLibraryBooksByQuery(query) {
