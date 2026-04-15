@@ -2,10 +2,12 @@
   var form = document.querySelector(".search-form");
   var input = document.getElementById("book-search");
   var resultsRoot = document.getElementById("search-results");
-  var SOURCE_NAME = "Gutenberg";
+  var SOURCES = [
+    { id: "gutenberg", name: "Gutenberg" },
+    { id: "open-library", name: "Open Library" },
+  ];
   var resultState = {
-    books: [],
-    initialView: "full",
+    sourceResults: {},
   };
 
   if (!form || !input || !resultsRoot) return;
@@ -17,25 +19,6 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
-  }
-
-  function getAuthors(book) {
-    if (!book || !Array.isArray(book.authors) || book.authors.length === 0) {
-      return "Unknown author";
-    }
-
-    return book.authors
-      .map(function (author) {
-        return author && author.name ? author.name : null;
-      })
-      .filter(Boolean)
-      .join(", ");
-  }
-
-  function getBookLink(book) {
-    if (!book || !book.formats) return null;
-
-    return book.formats["text/html"] || book.formats["text/plain; charset=utf-8"] || book.formats["application/epub+zip"] || null;
   }
 
   function normalizeForMatch(value) {
@@ -72,14 +55,8 @@
     return Array.from(new Set(variations));
   }
 
-  async function fetchBooksByQuery(query) {
-    var response = await fetch("https://gutendex.com/books/?search=" + encodeURIComponent(query));
-    if (!response.ok) {
-      throw new Error("Request failed");
-    }
-
-    var data = await response.json();
-    return Array.isArray(data && data.results) ? data.results : [];
+  function getBookAuthors(book) {
+    return book && book.authors ? book.authors : "Unknown author";
   }
 
   function isHighConfidenceTopResult(book, query) {
@@ -100,14 +77,183 @@
       return true;
     }
 
-    var normalizedAuthors = normalizeForMatch(getAuthors(book));
+    var normalizedAuthors = normalizeForMatch(getBookAuthors(book));
     return normalizedAuthors === normalizedQuery;
   }
 
-  function buildResultRow(book, otherResultsCell) {
+  function prioritizeHighConfidenceMatch(books, query) {
+    if (!Array.isArray(books) || books.length < 2) return books || [];
+
+    for (var i = 0; i < books.length; i++) {
+      if (!isHighConfidenceTopResult(books[i], query)) continue;
+      if (i === 0) return books;
+      return [books[i]].concat(books.slice(0, i), books.slice(i + 1));
+    }
+
+    return books;
+  }
+
+  function getGutenbergBookLink(book) {
+    if (!book || !book.formats) return null;
+
+    return book.formats["text/html"] || book.formats["text/plain; charset=utf-8"] || book.formats["application/epub+zip"] || null;
+  }
+
+  function mapGutenbergBook(book) {
+    return {
+      title: book && book.title ? book.title : "Untitled",
+      authors:
+        book && Array.isArray(book.authors) && book.authors.length > 0
+          ? book.authors
+              .map(function (author) {
+                return author && author.name ? author.name : null;
+              })
+              .filter(Boolean)
+              .join(", ")
+          : "Unknown author",
+      link: getGutenbergBookLink(book),
+    };
+  }
+
+  async function fetchGutenbergBooksByQuery(query) {
+    var response = await fetch("https://gutendex.com/books/?search=" + encodeURIComponent(query));
+    if (!response.ok) {
+      throw new Error("Request failed");
+    }
+
+    var data = await response.json();
+    var results = Array.isArray(data && data.results) ? data.results : [];
+    return results.map(mapGutenbergBook);
+  }
+
+  async function searchGutenberg(queries) {
+    var books = [];
+    var queryUsed = queries[0] || "";
+
+    for (var i = 0; i < queries.length; i++) {
+      queryUsed = queries[i];
+      try {
+        books = await fetchGutenbergBooksByQuery(queryUsed);
+      } catch (error) {
+        books = [];
+      }
+
+      if (books.length > 0) {
+        books = prioritizeHighConfidenceMatch(books, queryUsed);
+        break;
+      }
+    }
+
+    return {
+      sourceId: "gutenberg",
+      sourceName: "Gutenberg",
+      books: books,
+      queryUsed: queryUsed,
+    };
+  }
+
+  function getOpenLibraryBookLink(book) {
+    if (book && Array.isArray(book.ia) && book.ia.length > 0) {
+      return "https://archive.org/details/" + encodeURIComponent(book.ia[0]);
+    }
+
+    if (book && book.key) {
+      return "https://openlibrary.org" + book.key;
+    }
+
+    if (book && Array.isArray(book.edition_key) && book.edition_key.length > 0) {
+      return "https://openlibrary.org/books/" + encodeURIComponent(book.edition_key[0]);
+    }
+
+    return null;
+  }
+
+  function mapOpenLibraryBook(book) {
+    return {
+      title: book && book.title ? book.title : "Untitled",
+      authors:
+        book && Array.isArray(book.author_name) && book.author_name.length > 0
+          ? book.author_name.filter(Boolean).join(", ")
+          : "Unknown author",
+      link: getOpenLibraryBookLink(book),
+    };
+  }
+
+  async function fetchOpenLibraryBooksByQuery(query) {
+    var params = new URLSearchParams({
+      q: query,
+      ebook_access: "public",
+      limit: "25",
+    });
+    var response = await fetch("https://openlibrary.org/search.json?" + params.toString());
+    if (!response.ok) {
+      throw new Error("Request failed");
+    }
+
+    var data = await response.json();
+    var docs = Array.isArray(data && data.docs) ? data.docs : [];
+
+    return docs
+      .filter(function (book) {
+        var hasPublicEbookAccess = book && book.ebook_access === "public";
+        var hasUsableIdentifier = book && (book.key || (Array.isArray(book.edition_key) && book.edition_key.length > 0));
+        return hasPublicEbookAccess && book.title && hasUsableIdentifier;
+      })
+      .map(mapOpenLibraryBook);
+  }
+
+  async function searchOpenLibrary(queries) {
+    var books = [];
+    var queryUsed = queries[0] || "";
+
+    for (var i = 0; i < queries.length; i++) {
+      queryUsed = queries[i];
+      try {
+        books = await fetchOpenLibraryBooksByQuery(queryUsed);
+      } catch (error) {
+        books = [];
+      }
+
+      if (books.length > 0) {
+        books = prioritizeHighConfidenceMatch(books, queryUsed);
+        break;
+      }
+    }
+
+    return {
+      sourceId: "open-library",
+      sourceName: "Open Library",
+      books: books,
+      queryUsed: queryUsed,
+    };
+  }
+
+  function getSourceById(sourceId) {
+    for (var i = 0; i < SOURCES.length; i++) {
+      if (SOURCES[i].id === sourceId) return SOURCES[i];
+    }
+    return null;
+  }
+
+  function getSourceResult(sourceId) {
+    var source = getSourceById(sourceId);
+    var sourceResult = resultState.sourceResults[sourceId];
+    if (sourceResult && Array.isArray(sourceResult.books)) {
+      return sourceResult;
+    }
+
+    return {
+      sourceId: source ? source.id : sourceId,
+      sourceName: source ? source.name : sourceId,
+      books: [],
+      queryUsed: "",
+    };
+  }
+
+  function buildResultRow(book, sourceName, otherResultsCell) {
     var title = escapeHtml(book && book.title ? book.title : "Untitled");
-    var authors = escapeHtml(getAuthors(book));
-    var link = getBookLink(book);
+    var authors = escapeHtml(getBookAuthors(book));
+    var link = book && book.link ? book.link : null;
     var linkHtml = link
       ? '<a href="' + escapeHtml(link) + '" target="_blank" rel="noopener noreferrer">Open book</a>'
       : "No link available";
@@ -122,7 +268,7 @@
       authors +
       "</td>" +
       "<td>" +
-      escapeHtml(SOURCE_NAME) +
+      escapeHtml(sourceName) +
       "</td>" +
       "<td>" +
       linkHtml +
@@ -130,6 +276,20 @@
       "<td>" +
       otherCellHtml +
       "</td>" +
+      "</tr>"
+    );
+  }
+
+  function buildNoResultsRow(sourceName) {
+    return (
+      "<tr>" +
+      "<td>🔴 No results found</td>" +
+      "<td>—</td>" +
+      "<td>" +
+      escapeHtml(sourceName) +
+      "</td>" +
+      "<td>—</td>" +
+      "<td>0</td>" +
       "</tr>"
     );
   }
@@ -159,45 +319,54 @@
     resultsRoot.innerHTML = "<p>" + escapeHtml(message) + "</p>";
   }
 
-  function renderSummaryResult(books) {
-    var topResult = books[0];
-    var otherResultsCount = Math.max(books.length - 1, 0);
-    var otherResultsHtml =
-      otherResultsCount > 0
-        ? '<a href="#" data-action="show-all-results">' + otherResultsCount + "</a>"
-        : "0";
+  function renderSummaryResults() {
+    var rows = SOURCES.map(function (source) {
+      var sourceResult = getSourceResult(source.id);
+      if (sourceResult.books.length === 0) {
+        return buildNoResultsRow(source.name);
+      }
 
-    resultsRoot.innerHTML = buildResultsTable(buildResultRow(topResult, otherResultsHtml));
+      var topResult = sourceResult.books[0];
+      var otherResultsCount = Math.max(sourceResult.books.length - 1, 0);
+      var otherResultsHtml =
+        otherResultsCount > 0
+          ? '<a href="#" data-action="show-all-results" data-source-id="' +
+            escapeHtml(source.id) +
+            '">' +
+            otherResultsCount +
+            "</a>"
+          : "0";
+
+      return buildResultRow(topResult, source.name, otherResultsHtml);
+    }).join("");
+
+    resultsRoot.innerHTML = buildResultsTable(rows);
   }
 
-  function renderFullResults(books, showBackButton) {
-    var rows = books
+  function renderFullResultsForSource(sourceId) {
+    var source = getSourceById(sourceId);
+    var sourceResult = getSourceResult(sourceId);
+    if (!source || sourceResult.books.length === 0) {
+      renderSummaryResults();
+      return;
+    }
+
+    var rows = sourceResult.books
       .map(function (book, index) {
-        var otherResultsCount = Math.max(books.length - 1, 0);
+        var otherResultsCount = Math.max(sourceResult.books.length - 1, 0);
         var otherResultsCell = index === 0 ? String(otherResultsCount) : "—";
-        return buildResultRow(book, otherResultsCell);
+        return buildResultRow(book, source.name, otherResultsCell);
       })
       .join("");
 
-    var backButtonHtml = showBackButton
-      ? '<button type="button" class="results-back-button" data-action="show-summary">Back</button>'
-      : "";
-
-    resultsRoot.innerHTML = backButtonHtml + buildResultsTable(rows);
-  }
-
-  function renderInitialResults() {
-    if (!Array.isArray(resultState.books) || resultState.books.length === 0) {
-      renderMessage("No results found.");
-      return;
-    }
-
-    if (resultState.initialView === "summary") {
-      renderSummaryResult(resultState.books);
-      return;
-    }
-
-    renderFullResults(resultState.books, false);
+    var backButtonHtml = '<button type="button" class="results-back-button" data-action="show-summary">Back</button>';
+    var resultsContextHtml =
+      '<p class="results-context">Showing all ' +
+      escapeHtml(source.name) +
+      ' results for "' +
+      escapeHtml(sourceResult.queryUsed || input.value) +
+      '".</p>';
+    resultsRoot.innerHTML = backButtonHtml + resultsContextHtml + buildResultsTable(rows);
   }
 
   form.addEventListener("submit", async function (event) {
@@ -213,21 +382,12 @@
     renderMessage("Searching...");
 
     try {
-      var books = [];
-      for (var i = 0; i < queries.length; i++) {
-        books = await fetchBooksByQuery(queries[i]);
-        if (books.length > 0) {
-          break;
-        }
-      }
-      if (books.length === 0) {
-        renderMessage("No results found.");
-        return;
-      }
-
-      resultState.books = books;
-      resultState.initialView = isHighConfidenceTopResult(books[0], queries[0]) ? "summary" : "full";
-      renderInitialResults();
+      var searchResults = await Promise.all([searchGutenberg(queries), searchOpenLibrary(queries)]);
+      resultState.sourceResults = {};
+      searchResults.forEach(function (sourceResult) {
+        resultState.sourceResults[sourceResult.sourceId] = sourceResult;
+      });
+      renderSummaryResults();
     } catch (error) {
       renderMessage("Something went wrong while searching.");
     }
@@ -240,14 +400,15 @@
     var showAllLink = target.closest('[data-action="show-all-results"]');
     if (showAllLink) {
       event.preventDefault();
-      renderFullResults(resultState.books, true);
+      var sourceId = showAllLink.getAttribute("data-source-id");
+      renderFullResultsForSource(sourceId);
       return;
     }
 
     var showSummaryButton = target.closest('[data-action="show-summary"]');
     if (showSummaryButton) {
       event.preventDefault();
-      renderInitialResults();
+      renderSummaryResults();
     }
   });
 })();
