@@ -37,12 +37,68 @@
       .toLowerCase();
   }
 
-  function getSearchQueryVariations(value) {
+  function parseTitleAuthorQuery(value) {
     var normalizedQuery = normalizeSearchQuery(value);
-    if (!normalizedQuery) return [];
+    if (!normalizedQuery) {
+      return {
+        normalizedQuery: "",
+        title: "",
+        author: "",
+        hasTitleAndAuthor: false,
+      };
+    }
 
-    var parts = normalizedQuery.split(" ").filter(Boolean);
-    var variations = [normalizedQuery];
+    var byParts = normalizedQuery.split(/\s+by\s+/).map(function (part) {
+      return part.trim();
+    });
+
+    if (byParts.length >= 2 && byParts[0] && byParts[1]) {
+      return {
+        normalizedQuery: normalizedQuery,
+        title: byParts[0],
+        author: byParts.slice(1).join(" by ").trim(),
+        hasTitleAndAuthor: true,
+      };
+    }
+
+    return {
+      normalizedQuery: normalizedQuery,
+      title: "",
+      author: "",
+      hasTitleAndAuthor: false,
+    };
+  }
+
+  function isEnglishLanguageCode(languageCode) {
+    var normalizedCode = String(languageCode || "").trim().toLowerCase();
+    if (!normalizedCode) return false;
+    var canonicalCode = normalizedCode.split("/").filter(Boolean).pop() || normalizedCode;
+    return (
+      canonicalCode === "en" ||
+      canonicalCode === "eng" ||
+      canonicalCode === "en-us" ||
+      canonicalCode === "en-gb" ||
+      canonicalCode === "english"
+    );
+  }
+
+  function hasEnglishLanguage(languages) {
+    if (!Array.isArray(languages) || languages.length === 0) return false;
+    return languages.some(isEnglishLanguageCode);
+  }
+
+  function getSearchQueryVariations(value) {
+    var parsedQuery = parseTitleAuthorQuery(value);
+    if (!parsedQuery.normalizedQuery) return [];
+
+    var parts = parsedQuery.normalizedQuery.split(" ").filter(Boolean);
+    var variations = [parsedQuery.normalizedQuery];
+
+    if (parsedQuery.hasTitleAndAuthor) {
+      variations.push(parsedQuery.title + " " + parsedQuery.author);
+      variations.push(parsedQuery.title);
+      variations.push(parsedQuery.author);
+    }
 
     if (parts.length > 4) {
       variations.push(parts.slice(0, 4).join(" "));
@@ -59,12 +115,40 @@
     return book && book.authors ? book.authors : "Unknown author";
   }
 
+  function isStrongNormalizedMatch(targetValue, queryValue) {
+    if (!targetValue || !queryValue) return false;
+
+    if (targetValue === queryValue) {
+      return true;
+    }
+
+    if (
+      targetValue.indexOf(queryValue) === 0 &&
+      queryValue.length >= Math.max(3, Math.floor(targetValue.length * 0.45))
+    ) {
+      return true;
+    }
+
+    return targetValue.indexOf(queryValue) !== -1 && queryValue.length >= 4;
+  }
+
   function isHighConfidenceTopResult(book, query) {
     if (!book) return false;
 
-    var normalizedQuery = normalizeForMatch(query);
+    var parsedQuery = parseTitleAuthorQuery(query);
+    var normalizedQuery = normalizeForMatch(parsedQuery.normalizedQuery);
     var normalizedTitle = normalizeForMatch(book.title);
     if (!normalizedQuery || !normalizedTitle) return false;
+
+    var normalizedAuthors = normalizeForMatch(getBookAuthors(book));
+
+    if (parsedQuery.hasTitleAndAuthor) {
+      var titleMatches = isStrongNormalizedMatch(normalizedTitle, normalizeForMatch(parsedQuery.title));
+      var authorMatches = isStrongNormalizedMatch(normalizedAuthors, normalizeForMatch(parsedQuery.author));
+      if (titleMatches && authorMatches) {
+        return true;
+      }
+    }
 
     if (normalizedTitle === normalizedQuery || normalizedQuery === normalizedTitle) {
       return true;
@@ -77,7 +161,6 @@
       return true;
     }
 
-    var normalizedAuthors = normalizeForMatch(getBookAuthors(book));
     return normalizedAuthors === normalizedQuery;
   }
 
@@ -115,6 +198,11 @@
     };
   }
 
+  function isEnglishGutenbergBook(book) {
+    var languages = book && Array.isArray(book.languages) ? book.languages : [];
+    return !!(book && book.title && hasEnglishLanguage(languages));
+  }
+
   async function fetchGutenbergBooksByQuery(query) {
     var response = await fetch("https://gutendex.com/books/?search=" + encodeURIComponent(query));
     if (!response.ok) {
@@ -123,10 +211,10 @@
 
     var data = await response.json();
     var results = Array.isArray(data && data.results) ? data.results : [];
-    return results.map(mapGutenbergBook);
+    return results.filter(isEnglishGutenbergBook).map(mapGutenbergBook);
   }
 
-  async function searchGutenberg(queries) {
+  async function searchGutenberg(queries, rawQuery) {
     var books = [];
     var queryUsed = queries[0] || "";
 
@@ -139,7 +227,7 @@
       }
 
       if (books.length > 0) {
-        books = prioritizeHighConfidenceMatch(books, queryUsed);
+        books = prioritizeHighConfidenceMatch(books, rawQuery || queryUsed);
         break;
       }
     }
@@ -179,6 +267,13 @@
     };
   }
 
+  function isEnglishOpenLibraryBook(book) {
+    var hasPublicEbookAccess = book && book.ebook_access === "public";
+    var hasUsableIdentifier = book && (book.key || (Array.isArray(book.edition_key) && book.edition_key.length > 0));
+    var languages = book && Array.isArray(book.language) ? book.language : [];
+    return !!(hasPublicEbookAccess && book && book.title && hasUsableIdentifier && hasEnglishLanguage(languages));
+  }
+
   async function fetchOpenLibraryBooksByQuery(query) {
     var params = new URLSearchParams({
       q: query,
@@ -195,14 +290,12 @@
 
     return docs
       .filter(function (book) {
-        var hasPublicEbookAccess = book && book.ebook_access === "public";
-        var hasUsableIdentifier = book && (book.key || (Array.isArray(book.edition_key) && book.edition_key.length > 0));
-        return hasPublicEbookAccess && book.title && hasUsableIdentifier;
+        return isEnglishOpenLibraryBook(book);
       })
       .map(mapOpenLibraryBook);
   }
 
-  async function searchOpenLibrary(queries) {
+  async function searchOpenLibrary(queries, rawQuery) {
     var books = [];
     var queryUsed = queries[0] || "";
 
@@ -215,7 +308,7 @@
       }
 
       if (books.length > 0) {
-        books = prioritizeHighConfidenceMatch(books, queryUsed);
+        books = prioritizeHighConfidenceMatch(books, rawQuery || queryUsed);
         break;
       }
     }
@@ -382,7 +475,7 @@
     renderMessage("Searching...");
 
     try {
-      var searchResults = await Promise.all([searchGutenberg(queries), searchOpenLibrary(queries)]);
+      var searchResults = await Promise.all([searchGutenberg(queries, rawQuery), searchOpenLibrary(queries, rawQuery)]);
       resultState.sourceResults = {};
       searchResults.forEach(function (sourceResult) {
         resultState.sourceResults[sourceResult.sourceId] = sourceResult;
