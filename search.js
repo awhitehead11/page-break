@@ -45,6 +45,43 @@
       .trim();
   }
 
+  function normalizeSearchQuery(value) {
+    return String(value || "")
+      .trim()
+      .replace(/&/g, " and ")
+      .replace(/[.,:;!?'"`()[\]{}]/g, " ")
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+  }
+
+  function getSearchQueryVariations(value) {
+    var normalizedQuery = normalizeSearchQuery(value);
+    if (!normalizedQuery) return [];
+
+    var parts = normalizedQuery.split(" ").filter(Boolean);
+    var variations = [normalizedQuery];
+
+    if (parts.length > 4) {
+      variations.push(parts.slice(0, 4).join(" "));
+    }
+
+    if (parts.length > 3) {
+      variations.push(parts.slice(0, 3).join(" "));
+    }
+
+    return Array.from(new Set(variations));
+  }
+
+  async function fetchBooksByQuery(query) {
+    var response = await fetch("https://gutendex.com/books/?search=" + encodeURIComponent(query));
+    if (!response.ok) {
+      throw new Error("Request failed");
+    }
+
+    var data = await response.json();
+    return Array.isArray(data && data.results) ? data.results : [];
+  }
+
   function isHighConfidenceTopResult(book, query) {
     if (!book) return false;
 
@@ -166,8 +203,9 @@
   form.addEventListener("submit", async function (event) {
     event.preventDefault();
 
-    var query = input.value.trim();
-    if (!query) {
+    var rawQuery = input.value;
+    var queries = getSearchQueryVariations(rawQuery);
+    if (queries.length === 0) {
       renderMessage("Type a book title to search.");
       return;
     }
@@ -175,20 +213,20 @@
     renderMessage("Searching...");
 
     try {
-      var response = await fetch("https://gutendex.com/books/?search=" + encodeURIComponent(query));
-      if (!response.ok) {
-        throw new Error("Request failed");
+      var books = [];
+      for (var i = 0; i < queries.length; i++) {
+        books = await fetchBooksByQuery(queries[i]);
+        if (books.length > 0) {
+          break;
+        }
       }
-
-      var data = await response.json();
-      var books = Array.isArray(data && data.results) ? data.results : [];
       if (books.length === 0) {
         renderMessage("No results found.");
         return;
       }
 
       resultState.books = books;
-      resultState.initialView = isHighConfidenceTopResult(books[0], query) ? "summary" : "full";
+      resultState.initialView = isHighConfidenceTopResult(books[0], queries[0]) ? "summary" : "full";
       renderInitialResults();
     } catch (error) {
       renderMessage("Something went wrong while searching.");
