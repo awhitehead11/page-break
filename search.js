@@ -72,7 +72,7 @@
     renderMessage("Searching...");
 
     try {
-      var response = await fetch("https://gutendex.com/books?search=" + encodeURIComponent(query));
+      var response = await fetch("https://gutendex.com/books/?search=" + encodeURIComponent(query));
       if (!response.ok) {
         throw new Error("Request failed");
       }
