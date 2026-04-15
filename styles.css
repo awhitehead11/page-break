@@ -242,6 +242,76 @@ body {
   outline-offset: 2px;
 }
 
+#search-results {
+  width: 100%;
+  max-width: 60rem;
+  margin-top: 1.25rem;
+}
+
+.results-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--blue-150);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 42rem;
+}
+
+.results-table th,
+.results-table td {
+  text-align: left;
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid var(--blue-100);
+  vertical-align: top;
+}
+
+.results-table th {
+  background: var(--blue-50);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.results-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.results-table a {
+  color: var(--blue-700);
+  font-weight: 500;
+}
+
+.results-table a:hover {
+  text-decoration: none;
+}
+
+.results-back-button {
+  margin: 0 0 0.6rem;
+  padding: 0.5rem 0.8rem;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--blue-700);
+  background: var(--blue-50);
+  border: 1px solid var(--blue-200);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.results-back-button:hover {
+  background: var(--blue-100);
+}
+
+.results-back-button:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: 2px;
+}
+
 /* ——— Page shell ——— */
 .page-shell {
   min-height: 100vh;
