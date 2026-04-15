@@ -44,11 +44,20 @@
       </header>
 
       <main class="main-search">
-        <div class="drm-filter" aria-label="DRM filter">
-          <p class="drm-filter__label">DRM only?</p>
-          <div class="drm-toggle drm-toggle--yes" role="switch" aria-checked="true" aria-disabled="true">
-            <span class="drm-toggle__option drm-toggle__option--no">No</span>
-            <span class="drm-toggle__thumb" aria-hidden="true">Yes</span>
+        <div class="search-filter-toggles" aria-label="Search filters">
+          <div class="drm-filter" aria-label="DRM filter">
+            <p class="drm-filter__label">DRM only?</p>
+            <div class="drm-toggle drm-toggle--yes" role="switch" aria-checked="true" aria-disabled="true">
+              <span class="drm-toggle__option drm-toggle__option--no">No</span>
+              <span class="drm-toggle__thumb" aria-hidden="true">Yes</span>
+            </div>
+          </div>
+          <div class="drm-filter" aria-label="English only filter">
+            <p class="drm-filter__label">English only?</p>
+            <div class="drm-toggle drm-toggle--yes" role="switch" aria-checked="true" aria-disabled="true">
+              <span class="drm-toggle__option drm-toggle__option--no">No</span>
+              <span class="drm-toggle__thumb" aria-hidden="true">Yes</span>
+            </div>
           </div>
         </div>
         <form class="search-form" action="#" method="get" role="search" aria-label="Search books">

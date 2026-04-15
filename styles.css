@@ -186,10 +186,18 @@ body {
   min-height: min(50vh, 420px);
 }
 
-.drm-filter {
+.search-filter-toggles {
   width: 100%;
   max-width: 38rem;
   margin-bottom: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+.drm-filter {
+  flex: 1 1 18rem;
+  min-width: 16rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
